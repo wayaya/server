@@ -99,9 +99,16 @@ public class MemoryMessagesStore implements IMessagesStore {
 
     private final Server m_Server;
 
-    private Map<String, TreeMap<Long, Long>> userMessages = new HashMap<>();
+    // long[]大小必须为偶数，里面的内容定义如下：
+    // 0: headIndex，最旧的seqId-msgId对的存储位置
+    // 1: tailIndex，最新seqId-msgId对的存储位置
+    // i: seqId
+    // i + 1: msgId
+    // i为大于1的偶数
+    // 插入新seqId-msgId时，如果超过容量范围，headIndex和tailIndex会自旋
+    private Map<String, long[]> userMessages = new HashMap<>();
 
-    private Map<String, TreeMap<Long, Long>> chatroomMessages = new HashMap<>();
+    private Map<String, long[]> chatroomMessages = new HashMap<>();
 
     private ReadWriteLock mLock = new ReentrantReadWriteLock();
     private Lock mReadLock = mLock.readLock();
@@ -161,7 +168,7 @@ public class MemoryMessagesStore implements IMessagesStore {
 
 
         MessageBundle messageBundle = new MessageBundle(message.getMessageId(), fromUser, fromClientId, message);
-        if (message.getContent().getPersistFlag() ==  Transparent) {
+        if (message.getContent().getPersistFlag() == Transparent) {
             mIMap.put(message.getMessageId(), messageBundle, 10, TimeUnit.SECONDS);
         } else {
             mIMap.put(message.getMessageId(), messageBundle, 7, TimeUnit.DAYS);
@@ -192,7 +199,7 @@ public class MemoryMessagesStore implements IMessagesStore {
 
             if (!StringUtil.isNullOrEmpty(message.getToUser())) {
                 notifyReceivers.add(message.getToUser());
-            } else if(!message.getToList().isEmpty()) {
+            } else if (!message.getToList().isEmpty()) {
                 notifyReceivers.addAll(message.getToList());
             } else {
                 MultiMap<String, WFCMessage.GroupMember> groupMembers = hzInstance.getMultiMap(GROUP_MEMBERS);
@@ -207,8 +214,8 @@ public class MemoryMessagesStore implements IMessagesStore {
                 }
             }
 
-            //如果是群助手的消息，返回pull type group，否则返回normal
-            //群助手还没有实现
+            // 如果是群助手的消息，返回pull type group，否则返回normal
+            // 群助手还没有实现
             pullType = ProtoConstants.PullType.Pull_Normal;
         } else if (type == ProtoConstants.ConversationType.ConversationType_ChatRoom) {
             boolean isDirect = !StringUtil.isNullOrEmpty(message.getToUser());
@@ -225,7 +232,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             }
 
             pullType = ProtoConstants.PullType.Pull_ChatRoom;
-        } else if(type == ProtoConstants.ConversationType.ConversationType_Channel) {
+        } else if (type == ProtoConstants.ConversationType.ConversationType_Channel) {
             WFCMessage.ChannelInfo channelInfo = getChannelInfo(message.getConversation().getTarget());
             if (channelInfo != null) {
                 notifyReceivers.add(fromUser);
@@ -277,14 +284,13 @@ public class MemoryMessagesStore implements IMessagesStore {
 
         String chatroomId = null;
         if (pullType == ProtoConstants.PullType.Pull_ChatRoom) {
-            chatroomId = (String)m_Server.getHazelcastInstance().getMap(USER_CHATROOM).get(user);
+            chatroomId = (String) m_Server.getHazelcastInstance().getMap(USER_CHATROOM).get(user);
         }
-
 
         long head = fromMessageId;
         long current = fromMessageId;
 
-        TreeMap<Long, Long> maps;
+        long[] maps;
 
         if (pullType != ProtoConstants.PullType.Pull_ChatRoom) {
             maps = userMessages.get(user);
@@ -299,7 +305,7 @@ public class MemoryMessagesStore implements IMessagesStore {
                 try {
                     maps = chatroomMessages.get(user);
                     if (maps == null) {
-                        maps = new TreeMap<>();
+                        maps = new long[MAX_MESSAGE_QUEUE * 2 + 2];
                         chatroomMessages.put(user, maps);
                     }
                 } finally {
@@ -326,17 +332,18 @@ public class MemoryMessagesStore implements IMessagesStore {
                 noRoaming = true;
             }
             while (true) {
-                Map.Entry<Long, Long> entry = maps.higherEntry(current);
-                if (entry == null) {
+                long[] nextSeqIdMsgIdPair = nextSeqIdMsgIdPair(maps, current);
+                if (nextSeqIdMsgIdPair == null) {
                     break;
                 }
-                current = entry.getKey();
-                long targetMessageId = entry.getValue();
+                current = nextSeqIdMsgIdPair[0];
+                long targetMessageId = nextSeqIdMsgIdPair[1];
 
                 MessageBundle bundle = mIMap.get(targetMessageId);
 
                 if (bundle != null) {
-                    if (exceptClientId == null || !exceptClientId.equals(bundle.getFromClientId()) || !user.equals(bundle.getFromUser())) {
+                    if (exceptClientId == null || !exceptClientId.equals(bundle.getFromClientId())
+                        || !user.equals(bundle.getFromUser())) {
 
                         if (pullType == ProtoConstants.PullType.Pull_ChatRoom) {
                             if (!bundle.getMessage().getConversation().getTarget().equals(chatroomId)) {
@@ -344,12 +351,13 @@ public class MemoryMessagesStore implements IMessagesStore {
                             }
                         }
 
-                        if (noRoaming && (System.currentTimeMillis() - bundle.getMessage().getServerTimestamp() > 5 * 60 * 1000)) {
+                        if (noRoaming && (System.currentTimeMillis() - bundle.getMessage().getServerTimestamp() > 5 * 60
+                            * 1000)) {
                             continue;
                         }
 
                         size += bundle.getMessage().getSerializedSize();
-                        if (size >= 1 * 1024 * 1024) { //3M
+                        if (size >= 1 * 1024 * 1024) { // 3M
                             break;
                         }
                         builder.addMessage(bundle.getMessage());
@@ -357,10 +365,8 @@ public class MemoryMessagesStore implements IMessagesStore {
                 }
             }
 
-            Map.Entry<Long, Long> lastEntry = maps.lastEntry();
-            if (lastEntry != null) {
-                head = lastEntry.getKey();
-            }
+            long last = lastSeqId(maps);
+            head = last != -1 ? last : head;
         } finally {
             mReadLock.unlock();
         }
@@ -375,12 +381,12 @@ public class MemoryMessagesStore implements IMessagesStore {
         WFCMessage.PullMessageResult.Builder builder = WFCMessage.PullMessageResult.newBuilder();
         List<WFCMessage.Message> messages;
         if (IS_MESSAGE_REMOTE_HISTORY_MESSAGE) {
-           messages = databaseStore.loadRemoteMessages(user, conversation, beforeUid, count);
+            messages = databaseStore.loadRemoteMessages(user, conversation, beforeUid, count);
         } else {
-           messages = new ArrayList<>();
+            messages = new ArrayList<>();
         }
         builder.setCurrent(0).setHead(0);
-        if(messages != null) {
+        if (messages != null) {
             builder.addAllMessage(messages);
         }
         return builder.build();
@@ -392,7 +398,8 @@ public class MemoryMessagesStore implements IMessagesStore {
         Collection<UserClientEntry> members = chatroomMembers.get(chatroomId);
         return members;
     }
-    //Todo chatroom
+
+    // Todo chatroom
     @Override
     public WFCMessage.PullMessageResult fetchChatroomMessage(String fromUser, String chatroomId, String exceptClientId, long fromMessageId) {
         WFCMessage.PullMessageResult.Builder builder = WFCMessage.PullMessageResult.newBuilder();
@@ -400,17 +407,16 @@ public class MemoryMessagesStore implements IMessagesStore {
         HazelcastInstance hzInstance = m_Server.getHazelcastInstance();
         IMap<Long, MessageBundle> mIMap = hzInstance.getMap(MESSAGES_MAP);
 
-
         long head = fromMessageId;
         long current = fromMessageId;
 
-        TreeMap<Long, Long> maps = chatroomMessages.get(chatroomId);
+        long[] maps = chatroomMessages.get(chatroomId);
         if (maps == null) {
             mWriteLock.lock();
             try {
                 maps = chatroomMessages.get(chatroomId);
                 if (maps == null) {
-                    maps = new TreeMap<>();
+                    maps = new long[MAX_CHATROOM_MESSAGE_QUEUE * 2 + 2];
                     chatroomMessages.put(chatroomId, maps);
                 }
             } finally {
@@ -424,18 +430,19 @@ public class MemoryMessagesStore implements IMessagesStore {
             maps = chatroomMessages.get(chatroomId);
 
             while (true) {
-                Map.Entry<Long, Long> entry = maps.higherEntry(current);
-                if (entry == null) {
+                long[] nextSeqIdMsgIdPair = nextSeqIdMsgIdPair(maps, current);
+                if (nextSeqIdMsgIdPair == null) {
                     break;
                 }
-                current = entry.getKey();
-                long targetMessageId = entry.getValue();
+                current = nextSeqIdMsgIdPair[0];
+                long targetMessageId = nextSeqIdMsgIdPair[1];
 
                 MessageBundle bundle = mIMap.get(targetMessageId);
                 if (bundle != null) {
-                    if (exceptClientId == null || !exceptClientId.equals(bundle.getFromClientId()) || !fromUser.equals(bundle.getFromUser())) {
+                    if (exceptClientId == null || !exceptClientId.equals(bundle.getFromClientId())
+                        || !fromUser.equals(bundle.getFromUser())) {
                         size += bundle.getMessage().getSerializedSize();
-                        if (size >= 3 * 1024 * 1024) { //3M
+                        if (size >= 3 * 1024 * 1024) { // 3M
                             break;
                         }
                         builder.addMessage(bundle.getMessage());
@@ -443,10 +450,8 @@ public class MemoryMessagesStore implements IMessagesStore {
                 }
             }
 
-            Map.Entry<Long, Long> lastEntry = maps.lastEntry();
-            if (lastEntry != null) {
-                head = lastEntry.getKey();
-            }
+            long last = lastSeqId(maps);
+            head = last != -1 ? last : head;
         } finally {
             mReadLock.unlock();
         }
@@ -467,19 +472,15 @@ public class MemoryMessagesStore implements IMessagesStore {
             return insertChatroomMessages(target, line, messageId);
         }
 
-
         mWriteLock.lock();
         try {
-            TreeMap<Long, Long> maps = userMessages.get(user);
+            long[] maps = userMessages.get(user);
             if (maps == null) {
                 maps = databaseStore.reloadUserMessageMaps(user);
                 userMessages.put(user, maps);
             }
 
-            Map.Entry<Long, Long> lastEntry = maps.lastEntry();
-            if (lastEntry != null) {
-                messageSeq = (lastEntry.getKey() + 1);
-            }
+            messageSeq = lastSeqId(maps) + 1;
             Long maxPullSeq = userMaxPullSeq.get(user);
             if (maxPullSeq != null && maxPullSeq > messageSeq) {
                 messageSeq = maxPullSeq + 1;
@@ -489,10 +490,7 @@ public class MemoryMessagesStore implements IMessagesStore {
                 messageSeq = messageId;
             }
 
-            maps.put(messageSeq, messageId);
-            if (maps.size() > MAX_MESSAGE_QUEUE) {
-                maps.remove(maps.firstKey());
-            }
+            insertSeqIdMsgIdPair(maps, messageSeq, messageId);
         } finally {
             mWriteLock.unlock();
         }
@@ -501,9 +499,78 @@ public class MemoryMessagesStore implements IMessagesStore {
         return messageSeq;
     }
 
+    private long lastSeqId(long[] seqIdMsgIdPairs) {
+        int headIndex = (int) seqIdMsgIdPairs[0];
+        int tailIndex = (int) seqIdMsgIdPairs[1];
+        if (headIndex == tailIndex && headIndex == 0) {
+            return -1;
+        }
+        return seqIdMsgIdPairs[tailIndex];
+    }
+
+    private long[] nextSeqIdMsgIdPair(long[] seqIdMsgIdPairs, long currentSeqId) {
+        int headIndex = (int) seqIdMsgIdPairs[0];
+        int tailIndex = (int) seqIdMsgIdPairs[1];
+
+        int count = 0;
+        if (tailIndex >= headIndex) {
+            count = (tailIndex - headIndex) / 2 + 1;
+        } else {
+            count = MAX_MESSAGE_QUEUE;
+        }
+        if (count == 0) {
+            return null;
+        }
+
+        long[] nextSeqIdMsgIdPair = new long[2];
+        int nextSeqIdMsgIdPairIndex = -1;
+        for (int i = 0; i < count; i++) {
+            if (seqIdMsgIdPairs[headIndex] > currentSeqId) {
+                nextSeqIdMsgIdPairIndex = headIndex;
+                break;
+            }
+            headIndex += 2;
+            if (headIndex >= seqIdMsgIdPairs.length) {
+                headIndex = 2;
+            }
+        }
+
+        if (nextSeqIdMsgIdPairIndex == -1) {
+            return null;
+        }
+
+        nextSeqIdMsgIdPair[0] = seqIdMsgIdPairs[nextSeqIdMsgIdPairIndex];
+        nextSeqIdMsgIdPair[1] = seqIdMsgIdPairs[nextSeqIdMsgIdPairIndex + 1];
+
+        return nextSeqIdMsgIdPair;
+    }
+
+    private void insertSeqIdMsgIdPair(long[] seqIdMsgIdPairs, long seqId, long msgId) {
+        int headIndex = (int) seqIdMsgIdPairs[0];
+        int tailIndex = (int) seqIdMsgIdPairs[1];
+
+        tailIndex += 2;
+        if (tailIndex >= seqIdMsgIdPairs.length) {
+            tailIndex = 2;
+        }
+
+        if (tailIndex >= headIndex) {
+            headIndex += 2;
+        }
+        if (headIndex >= seqIdMsgIdPairs.length) {
+            headIndex = 2;
+        }
+
+        seqIdMsgIdPairs[0] = headIndex;
+        seqIdMsgIdPairs[1] = tailIndex;
+
+        seqIdMsgIdPairs[tailIndex] = seqId;
+        seqIdMsgIdPairs[tailIndex + 1] = msgId;
+    }
+
     @Override
     public Collection<String> getChatroomMemberClient(String userId) {
-        String chatroomId = (String)m_Server.getHazelcastInstance().getMap(USER_CHATROOM).get(userId);
+        String chatroomId = (String) m_Server.getHazelcastInstance().getMap(USER_CHATROOM).get(userId);
         if (StringUtil.isNullOrEmpty(chatroomId)) {
             return new HashSet<>();
         }
@@ -533,7 +600,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             return false;
         }
 
-        String existChatroomId = (String)m_Server.getHazelcastInstance().getMap(USER_CHATROOM).get(user);
+        String existChatroomId = (String) m_Server.getHazelcastInstance().getMap(USER_CHATROOM).get(user);
         if (StringUtil.isNullOrEmpty(existChatroomId) && (chatroomId == null || !existChatroomId.equals(chatroomId))) {
             return false;
         }
@@ -566,26 +633,19 @@ public class MemoryMessagesStore implements IMessagesStore {
 
         mWriteLock.lock();
         try {
-            TreeMap<Long, Long> maps = chatroomMessages.get(target);
+            long[] maps = chatroomMessages.get(target);
             if (maps == null) {
-                maps = new TreeMap<>();
+                maps = new long[MAX_CHATROOM_MESSAGE_QUEUE * 2 + 2];
                 chatroomMessages.put(target, maps);
             }
 
-            Map.Entry<Long, Long> lastEntry = maps.lastEntry();
-            if (lastEntry != null) {
-                messageSeq = (lastEntry.getKey() + 1);
-            }
-
+            messageSeq = lastSeqId(maps) + 1;
 
             if (messageSeq == 0) {
                 messageSeq = messageId;
             }
 
-            maps.put(messageSeq, messageId);
-            if (maps.size() > MAX_CHATROOM_MESSAGE_QUEUE) {
-                maps.remove(maps.firstKey());
-            }
+            insertSeqIdMsgIdPair(maps, messageSeq, messageId);
         } finally {
             mWriteLock.unlock();
         }
@@ -670,7 +730,7 @@ public class MemoryMessagesStore implements IMessagesStore {
                     return ErrorCode.ERROR_CODE_NOT_RIGHT;
                 } else if (groupInfo.getJoinType() == 1) {
                     if (memberList.size() == 1 && operator.equals(memberList.get(0).getMemberId()))
-                    return ErrorCode.ERROR_CODE_NOT_RIGHT;
+                        return ErrorCode.ERROR_CODE_NOT_RIGHT;
                 }
             }
 
@@ -762,7 +822,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             if (members == null || members.size() == 0) {
                 members = loadGroupMemberFromDB(hzInstance, groupId);
             }
-            for (WFCMessage.GroupMember member :members) {
+            for (WFCMessage.GroupMember member : members) {
                 if (member.getMemberId().equals(operator)) {
                     groupMembers.remove(groupId, member);
                     break;
@@ -786,7 +846,7 @@ public class MemoryMessagesStore implements IMessagesStore {
         MultiMap<String, WFCMessage.UserSettingEntry> userSettingMap = hzInstance.getMultiMap(USER_SETTING);
 
         databaseStore.removeGroupUserSettings(groupId, users);
-        for (String userId:users) {
+        for (String userId : users) {
             userSettingMap.remove(userId);
         }
 
@@ -808,7 +868,7 @@ public class MemoryMessagesStore implements IMessagesStore {
 
         if (!isAdmin && (groupInfo.getType() == ProtoConstants.GroupType.GroupType_Free ||
             (groupInfo.getType() == ProtoConstants.GroupType.GroupType_Restricted || groupInfo.getType() == ProtoConstants.GroupType.GroupType_Normal)
-                && (groupInfo.getOwner() == null || !groupInfo.getOwner().equals(operator)))) {
+            && (groupInfo.getOwner() == null || !groupInfo.getOwner().equals(operator)))) {
             return ErrorCode.ERROR_CODE_NOT_RIGHT;
         }
 
@@ -882,17 +942,17 @@ public class MemoryMessagesStore implements IMessagesStore {
 
         if (modifyType == Modify_Group_Name)
             newInfoBuilder.setName(value);
-        else if(modifyType == Modify_Group_Portrait)
+        else if (modifyType == Modify_Group_Portrait)
             newInfoBuilder.setPortrait(value);
-        else if(modifyType == Modify_Group_Extra)
+        else if (modifyType == Modify_Group_Extra)
             newInfoBuilder.setExtra(value);
-        else if(modifyType == Modify_Group_Mute)
+        else if (modifyType == Modify_Group_Mute)
             newInfoBuilder.setMute(Integer.parseInt(value));
-        else if(modifyType == Modify_Group_JoinType)
+        else if (modifyType == Modify_Group_JoinType)
             newInfoBuilder.setJoinType(Integer.parseInt(value));
-        else if(modifyType == Modify_Group_PrivateChat)
+        else if (modifyType == Modify_Group_PrivateChat)
             newInfoBuilder.setPrivateChat(Integer.parseInt(value));
-        else if(modifyType == Modify_Group_Searchable)
+        else if (modifyType == Modify_Group_Searchable)
             newInfoBuilder.setSearchable(Integer.parseInt(value));
         else
             return ErrorCode.INVALID_PARAMETER;
@@ -988,7 +1048,7 @@ public class MemoryMessagesStore implements IMessagesStore {
         if (memberCollection == null || memberCollection.size() == 0) {
             memberCollection = loadGroupMemberFromDB(hzInstance, groupId);
         }
-        for (WFCMessage.GroupMember member:memberCollection) {
+        for (WFCMessage.GroupMember member : memberCollection) {
             if (member.getUpdateDt() > maxDt) {
                 members.add(member);
             }
@@ -1037,7 +1097,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             return ErrorCode.ERROR_CODE_NOT_RIGHT;
         }
 
-        //check the new owner is in member list? is that necessary?
+        // check the new owner is in member list? is that necessary?
         long updateDt = System.currentTimeMillis();
         groupInfo = groupInfo.toBuilder().setOwner(newOwner).setUpdateDt(updateDt).build();
 
@@ -1053,7 +1113,7 @@ public class MemoryMessagesStore implements IMessagesStore {
                 member = member.toBuilder().setType(GroupMemberType_Owner).setUpdateDt(updateDt).build();
                 databaseStore.persistGroupMember(groupId, Arrays.asList(member));
                 groupMembers.put(groupId, member);
-            } else if(member.getType() == GroupMemberType_Owner) {
+            } else if (member.getType() == GroupMemberType_Owner) {
                 groupMembers.remove(groupId, member);
                 member = member.toBuilder().setType(GroupMemberType_Normal).setUpdateDt(updateDt).build();
                 databaseStore.persistGroupMember(groupId, Arrays.asList(member));
@@ -1094,7 +1154,7 @@ public class MemoryMessagesStore implements IMessagesStore {
                 member = member.toBuilder().setType(type == 0 ? ProtoConstants.GroupMemberType.GroupMemberType_Normal : ProtoConstants.GroupMemberType.GroupMemberType_Manager).setUpdateDt(updateDt).build();
                 databaseStore.persistGroupMember(groupId, Arrays.asList(member));
                 groupMembers.put(groupId, member);
-//                userList.remove(member.getMemberId());
+                // userList.remove(member.getMemberId());
             }
         }
 
@@ -1131,7 +1191,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             if (groupInfo.getOwner().equals(memberId)) {
                 return ErrorCode.ERROR_CODE_SUCCESS;
             }
-            isMute = groupInfo.getMute()>0;
+            isMute = groupInfo.getMute() > 0;
         }
 
         Collection<WFCMessage.GroupMember> members = groupMembers.get(groupId);
@@ -1205,7 +1265,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             if (!canRecall && message.getConversation().getType() == ProtoConstants.ConversationType.ConversationType_ChatRoom) {
                 IMap<String, WFCMessage.ChatroomInfo> chatroomInfoMap = hzInstance.getMap(CHATROOMS);
                 WFCMessage.ChatroomInfo room = chatroomInfoMap.get(message.getConversation().getTarget());
-                //todo check is manager
+                // todo check is manager
             }
 
             if (!canRecall) {
@@ -1342,7 +1402,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             builder.setUpdateDt(System.currentTimeMillis());
             user = builder.build();
             mUserMap.set(userId, user);
-//            databaseStore.updateUser(user);
+            // databaseStore.updateUser(user);
             return ErrorCode.ERROR_CODE_SUCCESS;
         } else {
             return ErrorCode.ERROR_CODE_NOT_MODIFIED;
@@ -1488,15 +1548,15 @@ public class MemoryMessagesStore implements IMessagesStore {
         if (members != null) {
             ArrayList<String> memberIds = new ArrayList<>();
             if (members.size() <= maxMemberCount) {
-                    members.stream().forEach(new Consumer<UserClientEntry>() {
-                        @Override
-                        public void accept(UserClientEntry userClientEntry) {
-                            memberIds.add(userClientEntry.userId);
-                        }
-                    });
+                members.stream().forEach(new Consumer<UserClientEntry>() {
+                    @Override
+                    public void accept(UserClientEntry userClientEntry) {
+                        memberIds.add(userClientEntry.userId);
+                    }
+                });
             } else {
                 Spliterator<UserClientEntry> p = members.spliterator();
-                while (p.estimateSize() > 2*maxMemberCount) {
+                while (p.estimateSize() > 2 * maxMemberCount) {
                     p = p.trySplit();
                 }
 
@@ -1863,7 +1923,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             friends = loadFriend(friendsMap, fromUser);
         }
 
-        for (FriendData fd:friends) {
+        for (FriendData fd : friends) {
             if (fd.getFriendUid().equals(targetUserId)) {
                 friendData = fd;
                 break;
@@ -1886,7 +1946,7 @@ public class MemoryMessagesStore implements IMessagesStore {
     }
 
     @Override
-    public ErrorCode setFriendAliasRequest(String fromUser, String targetUserId, String alias, long[] heads){
+    public ErrorCode setFriendAliasRequest(String fromUser, String targetUserId, String alias, long[] heads) {
         HazelcastInstance hzInstance = m_Server.getHazelcastInstance();
         MultiMap<String, FriendData> friendsMap = hzInstance.getMultiMap(USER_FRIENDS);
 
@@ -1896,7 +1956,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             friends = loadFriend(friendsMap, fromUser);
         }
 
-        for (FriendData fd:friends) {
+        for (FriendData fd : friends) {
             if (fd.getFriendUid().equals(targetUserId)) {
                 friendData = fd;
                 break;
@@ -1931,7 +1991,7 @@ public class MemoryMessagesStore implements IMessagesStore {
         m_Server.getHazelcastInstance().getMultiMap(CHATROOM_MEMBER_IDS).put(chatroomId, new UserClientEntry(userId, clientId));
 
         mWriteLock.lock();
-        chatroomMessages.put(userId, new TreeMap<>());
+        chatroomMessages.put(userId, new long[MAX_CHATROOM_MESSAGE_QUEUE * 2 + 2]);
         mWriteLock.unlock();
 
 
@@ -2037,7 +2097,7 @@ public class MemoryMessagesStore implements IMessagesStore {
 
         if (entries != null) {
             for (WFCMessage.UserSettingEntry entry : entries) {
-                if (entry.getScope() == scope && (key== null || key.equals(entry.getKey()))) {
+                if (entry.getScope() == scope && (key == null || key.equals(entry.getKey()))) {
                     return entry;
                 }
             }
@@ -2180,17 +2240,17 @@ public class MemoryMessagesStore implements IMessagesStore {
 
         if (modifyType == Modify_Channel_Name)
             newInfoBuilder.setName(value);
-        else if(modifyType == Modify_Channel_Portrait)
+        else if (modifyType == Modify_Channel_Portrait)
             newInfoBuilder.setPortrait(value);
-        else if(modifyType == Modify_Channel_Desc)
+        else if (modifyType == Modify_Channel_Desc)
             newInfoBuilder.setDesc(value);
-        else if(modifyType == Modify_Channel_Extra)
+        else if (modifyType == Modify_Channel_Extra)
             newInfoBuilder.setExtra(value);
-        else if(modifyType == Modify_Channel_Secret)
+        else if (modifyType == Modify_Channel_Secret)
             newInfoBuilder.setSecret(value);
-        else if(modifyType == Modify_Channel_Callback)
+        else if (modifyType == Modify_Channel_Callback)
             newInfoBuilder.setCallback(value);
-        else if(modifyType == Modify_Channel_OnlyCallback) {
+        else if (modifyType == Modify_Channel_OnlyCallback) {
             try {
                 newInfoBuilder.setAutomatic(Integer.parseInt(value));
             } catch (NumberFormatException e) {
@@ -2288,7 +2348,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             return false;
         }
 
-        if(!chatroomMembers.containsEntry(channelId, user)) {
+        if (!chatroomMembers.containsEntry(channelId, user)) {
             IMap<String, WFCMessage.ChannelInfo> mIMap = m_Server.getHazelcastInstance().getMap(CHANNELS);
             WFCMessage.ChannelInfo info = mIMap.get(channelId);
             if (info == null || !info.getOwner().equals(user)) {
@@ -2341,7 +2401,7 @@ public class MemoryMessagesStore implements IMessagesStore {
 
     @Override
     public long getMessageHead(String user) {
-        TreeMap<Long, Long> maps = userMessages.get(user);
+        long[] maps = userMessages.get(user);
         if (maps == null) {
             loadUserMessages(user);
         }
@@ -2349,9 +2409,9 @@ public class MemoryMessagesStore implements IMessagesStore {
         mReadLock.lock();
         try {
             maps = userMessages.get(user);
-            Map.Entry<Long, Long> lastEntry = maps.lastEntry();
-            if (lastEntry != null) {
-                return lastEntry.getKey();
+            long head = lastSeqId(maps);
+            if (head != -1) {
+                return head;
             }
         } finally {
             mReadLock.unlock();
@@ -2362,7 +2422,7 @@ public class MemoryMessagesStore implements IMessagesStore {
     private void loadUserMessages(String user) {
         mWriteLock.lock();
         try {
-            TreeMap<Long, Long> maps = userMessages.get(user);
+            long[] maps = userMessages.get(user);
             if (maps == null) {
                 maps = databaseStore.reloadUserMessageMaps(user);
                 userMessages.put(user, maps);
@@ -2436,14 +2496,14 @@ public class MemoryMessagesStore implements IMessagesStore {
 
 
     @Override
-    public String getShortUUID(){
+    public String getShortUUID() {
         int id = databaseStore.getGeneratedId();
         if (id > 0) {
             return IDUtils.toUid(id);
         }
         return UUIDGenerator.getUUID();
     }
-    
+
     @Override
     public void storeRetained(Topic topic, StoredMessage storedMessage) {
         LOG.debug("Store retained message for topic={}, CId={}", topic, storedMessage.getClientID());
@@ -2478,7 +2538,7 @@ public class MemoryMessagesStore implements IMessagesStore {
     public static String getName(int[] bytes) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < bytes.length; i++) {
-            char ch = (char)(bytes[i]+17);
+            char ch = (char) (bytes[i] + 17);
             sb.append(ch);
         }
         return sb.toString();

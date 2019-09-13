@@ -43,11 +43,11 @@ public class DatabaseStore {
         this.mScheduler = scheduler;
     }
 
-    TreeMap<Long, Long> reloadUserMessageMaps(String userId) {
+    long[] reloadUserMessageMaps(String userId) {
         Connection connection = null;
         PreparedStatement statement = null;
         ResultSet rs = null;
-        TreeMap<Long, Long> out = new TreeMap<>();
+        long[] out = new long[MAX_MESSAGE_QUEUE * 2 + 2];
         try {
             connection = DBUtil.getConnection();
 
@@ -60,12 +60,18 @@ public class DatabaseStore {
             statement.executeQuery();
 
             rs = statement.executeQuery();
-            while (rs.next()) {
+            rs.last();
+            int tailIndex = 0;
+            while (rs.previous()) {
                 int index = 1;
                 long msgSeq = rs.getLong(index++);
                 long msgId = rs.getLong(index);
-                out.put(msgSeq, msgId);
+                tailIndex += 2;
+                out[tailIndex] = msgSeq;
+                out[tailIndex + 1] = msgId;
             }
+            out[0] = tailIndex >= 2 ? 2 : 0;
+            out[1] = tailIndex;
         } catch (SQLException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
