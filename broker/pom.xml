@@ -179,10 +179,11 @@
             <scope>test</scope>
         </dependency>
 
+        <!--suppress MavenDuplicateDependenciesInspection -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <version>1.4.191</version>
+            <version>1.4.200</version>
             <scope>test</scope>
         </dependency>
 
@@ -206,10 +207,11 @@
         </dependency>
 
         <!-- https://mvnrepository.com/artifact/com.h2database/h2 -->
+        <!--suppress MavenDuplicateDependenciesInspection -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <version>1.4.197</version>
+            <version>1.4.199</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -233,6 +235,12 @@
             <version>3.4.1</version>
         </dependency>
 
+        <dependency>
+            <groupId>com.sun.activation</groupId>
+            <artifactId>javax.activation</artifactId>
+            <version>1.2.0</version>
+        </dependency>
+
     </dependencies>
 
 
@@ -249,6 +257,7 @@
             </plugin>
 
             <!-- Generate the test-jar -->
+            <!--suppress MavenDuplicatePluginInspection -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
@@ -263,6 +272,7 @@
             </plugin>
 
             <!-- Includes to generate OSGi headers -->
+            <!--suppress MavenDuplicatePluginInspection -->
             <plugin>
                 <artifactId>maven-jar-plugin</artifactId>
                 <configuration>
