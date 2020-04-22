@@ -60,6 +60,14 @@ public class GetMediaUploadTokenHandler extends IMHandler<WFCMessage.GetUploadTo
                     bucketName = MediaServerConfig.QINIU_BUCKET_FAVORITE_NAME;
                     bucketDomain = MediaServerConfig.QINIU_BUCKET_FAVORITE_DOMAIN;
                     break;
+                case 7:
+                    bucketName = MediaServerConfig.QINIU_BUCKET_STICKER_NAME;
+                    bucketDomain = MediaServerConfig.QINIU_BUCKET_STICKER_DOMAIN;
+                    break;
+               case 8:
+                    bucketName = MediaServerConfig.QINIU_BUCKET_MOMENTS_NAME;
+                    bucketDomain = MediaServerConfig.QINIU_BUCKET_MOMENTS_DOMAIN;
+                    break;
                 default:
                     bucketName = MediaServerConfig.QINIU_BUCKET_GENERAL_NAME;
                     bucketDomain = MediaServerConfig.QINIU_BUCKET_GENERAL_DOMAIN;
@@ -72,9 +80,9 @@ public class GetMediaUploadTokenHandler extends IMHandler<WFCMessage.GetUploadTo
             resultBuilder.setPort(80);
         } else {
             token = UploadFileAction.getToken(type);
-            resultBuilder.setDomain("http://" + MediaServerConfig.SERVER_IP + ":" + MediaServerConfig.HTTP_SERVER_PORT)
+            resultBuilder.setDomain("http://" + MediaServerConfig.SERVER_IP)
                 .setServer(MediaServerConfig.SERVER_IP);
-            resultBuilder.setPort(MediaServerConfig.HTTP_SERVER_PORT);
+            resultBuilder.setPort(80);
         }
 
         resultBuilder.setToken(token);

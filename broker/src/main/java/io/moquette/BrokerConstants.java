@@ -26,7 +26,6 @@ public final class BrokerConstants {
     public static final String SERVER_IP_PROPERTY_NAME = "server.ip";
     public static final String PORT_PROPERTY_NAME = "port";
     public static final String HOST_PROPERTY_NAME = "host";
-    public static final String HTTP_SERVER_PORT = "http_port";
     public static final String HTTP_LOCAL_PORT = "local_port";
 
     public static final String HTTP_ADMIN_PORT = "http.admin.port";
@@ -77,6 +76,10 @@ public final class BrokerConstants {
     public static final String QINIU_BUCKET_VIDEO_DOMAIN = "qiniu.bucket_video_domain";
     public static final String QINIU_BUCKET_FILE_NAME= "qiniu.bucket_file_name";
     public static final String QINIU_BUCKET_FILE_DOMAIN = "qiniu.bucket_file_domain";
+    public static final String QINIU_BUCKET_STICKER_NAME= "qiniu.bucket_sticker_name";
+    public static final String QINIU_BUCKET_STICKER_DOMAIN = "qiniu.bucket_sticker_domain";
+    public static final String QINIU_BUCKET_MOMENTS_NAME= "qiniu.bucket_moments_name";
+    public static final String QINIU_BUCKET_MOMENTS_DOMAIN = "qiniu.bucket_moments_domain";
     public static final String QINIU_BUCKET_PORTRAIT_NAME= "qiniu.bucket_portrait_name";
     public static final String QINIU_BUCKET_PORTRAIT_DOMAIN = "qiniu.bucket_portrait_domain";
     public static final String QINIU_BUCKET_FAVORITE_NAME= "qiniu.bucket_favorite_name";
@@ -92,7 +95,6 @@ public final class BrokerConstants {
 
     public static final String HZ_Cluster_Node_External_IP = "node_external_ip";
     public static final String HZ_Cluster_Node_External_Long_Port = "node_external_long_port";
-    public static final String HZ_Cluster_Node_External_Short_Port = "node_external_short_port";
     public static final String HZ_Cluster_Node_ID = "node_id";
     public static final String HTTP_SERVER_SECRET_KEY = "http.admin.secret_key";
     public static final String HTTP_SERVER_API_NO_CHECK_TIME = "http.admin.no_check_time";
