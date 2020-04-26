@@ -381,8 +381,8 @@ public class MemorySessionStore implements ISessionsStore {
                             if (s.getPlatform() == ProtoConstants.Platform.Platform_Android || s.getPlatform() == ProtoConstants.Platform.Platform_iOS) {
                                 remove = true;
                             }
-                        } else if(platform == ProtoConstants.Platform.Platform_OSX || platform == ProtoConstants.Platform.Platform_Windows || platform == ProtoConstants.Platform.Platform_Linux) {
-                            if (s.getPlatform() == ProtoConstants.Platform.Platform_OSX || s.getPlatform() == ProtoConstants.Platform.Platform_Windows || platform == ProtoConstants.Platform.Platform_Linux) {
+                        } else if(platform == ProtoConstants.Platform.Platform_OSX || platform == ProtoConstants.Platform.Platform_Windows || platform == ProtoConstants.Platform.Platform_LINUX) {
+                            if (s.getPlatform() == ProtoConstants.Platform.Platform_OSX || s.getPlatform() == ProtoConstants.Platform.Platform_Windows || platform == ProtoConstants.Platform.Platform_LINUX) {
                                 remove = true;
                             }
                         } else {
@@ -651,6 +651,25 @@ public class MemorySessionStore implements ISessionsStore {
         }
 
         return sessions.get(clientID).secondPhaseStore.size();
+    }
+
+
+    @Override
+    public ErrorCode kickoffPCClient(String operator, String pcClientId) {
+        Session session = sessions.get(pcClientId);
+        if (session != null) {
+            if (session.getPlatform() == ProtoConstants.Platform.Platform_LINUX
+                || session.getPlatform() == ProtoConstants.Platform.Platform_WEB
+                || session.getPlatform() == ProtoConstants.Platform.Platform_Windows
+                || session.getPlatform() == ProtoConstants.Platform.Platform_OSX) {
+                databaseStore.updateSessionDeleted(operator, pcClientId, 1);
+                sessions.remove(pcClientId);
+                mServer.getProcessor().kickoffSession(session);
+            } else {
+                return ErrorCode.ERROR_CODE_NOT_RIGHT;
+            }
+        }
+        return ErrorCode.ERROR_CODE_SUCCESS;
     }
 
     @Override

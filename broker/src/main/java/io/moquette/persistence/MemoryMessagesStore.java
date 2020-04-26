@@ -219,6 +219,12 @@ public class MemoryMessagesStore implements IMessagesStore {
             Utility.printExecption(LOG, e);
             printMissConfigLog(CHATROOM_Participant_Idle_Time, mChatroomParticipantIdleTime + "");
         }
+
+        try {
+            boolean disableRemoteMessageSearch = Boolean.parseBoolean(m_Server.getConfig().getProperty(BrokerConstants.MESSAGES_DISABLE_REMOTE_SEARCH, "false"));
+            databaseStore.setDisableRemoteMessageSearch(disableRemoteMessageSearch);
+        } catch (Exception e) {
+        }
     }
 
     private void printMissConfigLog(String config, String defaultValue) {
@@ -1591,7 +1597,7 @@ public class MemoryMessagesStore implements IMessagesStore {
             return;
         }
 
-        if (session.getPlatform() == Platform_Linux || session.getPlatform() == Platform_Windows || session.getPlatform() == Platform_OSX) {
+        if (session.getPlatform() == Platform_LINUX || session.getPlatform() == Platform_Windows || session.getPlatform() == Platform_OSX) {
             updateUserSettings(session.username, WFCMessage.ModifyUserSettingReq.newBuilder().setScope(kUserSettingPCOnline).setKey("PC").setValue(online ? (System.currentTimeMillis()  + "|"  + session.getPlatform() + "|" + session.getClientID() + "|" + session.getPhoneName()) : "").build());
         } else {
             String value = null;
@@ -1601,7 +1607,7 @@ public class MemoryMessagesStore implements IMessagesStore {
                 }
 
                 switch (s.getPlatform()) {
-                    case Platform_Linux:
+                    case Platform_LINUX:
                     case Platform_Windows:
                     case Platform_OSX:
                         value = System.currentTimeMillis() + "|" + s.getPlatform() + "|" + s.getClientID() + "|" + s.getPhoneName();
@@ -1833,11 +1839,12 @@ public class MemoryMessagesStore implements IMessagesStore {
                 Member member = m_Server.getHazelcastInstance().getCluster().getLocalMember();
                 String serverIp = member.getStringAttribute(HZ_Cluster_Node_External_IP);
                 String longPort = member.getStringAttribute(HZ_Cluster_Node_External_Long_Port);
+                String shortPort = member.getStringAttribute(HZ_Cluster_Node_External_Short_Port);
                 if (!StringUtil.isNullOrEmpty(serverIp)) {
                     serverIPs.add(serverIp);
                 }
                 ports.add(Integer.parseInt(longPort));
-                ports.add(80);
+                ports.add(Integer.parseInt(shortPort));
             } else {
                 return ErrorCode.ERROR_CODE_TOKEN_ERROR;
             }
