@@ -1,28 +1,36 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
-cd "$(dirname "$0")"
+# 打印日志
+function log(){
+    echo -e "$(date +'%Y-%m-%d %H:%M:%S')" msg: "$@"
+}
+
+
+cd "$(dirname "$0")" || exit
 
 # resolve links - $0 may be a softlink
 PRG="$0"
 
 while [ -h "$PRG" ]; do
-  ls=`ls -ld "$PRG"`
-  link=`expr "$ls" : '.*-> \(.*\)$'`
+  ls=$(ls -ld "$PRG")
+  link=$(expr "$ls" : '.*-> \(.*\)$')
   if expr "$link" : '/.*' > /dev/null; then
     PRG="$link"
   else
-    PRG=`dirname "$PRG"`/"$link"
+    PRG=$(dirname "$PRG")/"$link"
   fi
 done
 
-PRGDIR=`dirname "$PRG"`
+PRGDIR=$(dirname "$PRG")
+log "line:${LINENO} ${PRGDIR}"
+
 cd ..
-WILDFIRECHAT_HOME=`pwd`
+WILDFIRECHAT_HOME=$(pwd)
 
 
 export WILDFIRECHAT_HOME
 
-echo $WILDFIRECHAT_HOME
+log "line:${LINENO} ${WILDFIRECHAT_HOME}"
 
 if [ -f "${JAVA_HOME}/bin/java" ]; then
    JAVA=${JAVA_HOME}/bin/java
@@ -83,5 +91,12 @@ JAVA_OPTS="$JAVA_OPTS -XX:GCLogFileSize=10M"
 #JAVA_OPTS="$JAVA_OPTS -Xmx128M"
 #JAVA_OPTS="$JAVA_OPTS -Xms128M"
 
+log "line:${LINENO} ${JAVA}"
+log "line:${LINENO} ${JAVA_OPTS}"
+log "line:${LINENO} ${JAVA_OPTS_SCRIPT}"
 
-$JAVA -server $JAVA_OPTS $JAVA_OPTS_SCRIPT -Dlog4j.configuration="file:$LOG_FILE" -Dcom.mchange.v2.c3p0.cfg.xml="$C3P0_CONF_FILE" -Dhazelcast.configuration="file:$HZ_CONF_FILE" -Dwildfirechat.path="$WILDFIRECHAT_PATH" -cp "$WILDFIRECHAT_HOME/lib/*" cn.wildfirechat.server.Server
+#JAVA_OPTS -XX:+UseG1GC -XX:G1RSetUpdatingPauseTimePercent=5 -XX:MaxGCPauseMillis=500 -XX:+PrintGCDetails -XX:+PrintHeapAtGC -XX:+PrintTenuringDistribution -XX:+PrintGCApplicationStoppedTime -XX:+PrintPromotionFailure -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=10M
+#JAVA_OPTS_SCRIPT -XX:+HeapDumpOnOutOfMemoryError -Djava.awt.headless=true
+# shellcheck disable=SC2086
+#$JAVA -server ${JAVA_OPTS} ${JAVA_OPTS_SCRIPT} -Dlog4j.configuration="file:$LOG_FILE" -Dcom.mchange.v2.c3p0.cfg.xml="$C3P0_CONF_FILE" -Dhazelcast.configuration="file:$HZ_CONF_FILE" -Dwildfirechat.path="$WILDFIRECHAT_PATH" -cp "$WILDFIRECHAT_HOME/lib/*" cn.wildfirechat.server.Server
+$JAVA -server -Dlog4j.configuration="file:$LOG_FILE" -Dcom.mchange.v2.c3p0.cfg.xml="$C3P0_CONF_FILE" -Dhazelcast.configuration="file:$HZ_CONF_FILE" -Dwildfirechat.path="$WILDFIRECHAT_PATH" -cp "$WILDFIRECHAT_HOME/lib/*" cn.wildfirechat.server.Server
