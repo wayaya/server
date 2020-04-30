@@ -201,7 +201,7 @@ public class DatabaseStore {
             } else {
                 sql += " limit 20";
             }
-            
+
             if (page > 0) {
                 sql += "offset = '" + page * 20 + "'";
             }

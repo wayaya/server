@@ -136,12 +136,11 @@
             <scope>test</scope>
         </dependency>
 
-
-        <!-- https://mvnrepository.com/artifact/com.mchange/c3p0 -->
+        <!-- 数据库连接池 -->
         <dependency>
             <groupId>com.mchange</groupId>
             <artifactId>c3p0</artifactId>
-            <version>0.9.5.4</version>
+            <version>0.9.5.5</version>
         </dependency>
 
         <!-- needs extra dependencies: objenesis & hamcrest -->

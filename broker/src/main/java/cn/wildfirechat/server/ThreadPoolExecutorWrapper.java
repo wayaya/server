@@ -37,7 +37,7 @@ public class ThreadPoolExecutorWrapper {
                 task.run();
             } finally {
                 int endCount = runCounter.decrementAndGet();
-                LOG.debug("Finish task and current task count {} use time {}", endCount, System.currentTimeMillis()-startTime);
+                LOG.debug("Finish task and current task count {} use time {}", endCount, System.currentTimeMillis() - startTime);
             }
         });
     }

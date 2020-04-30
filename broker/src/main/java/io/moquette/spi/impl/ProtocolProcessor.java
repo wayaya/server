@@ -161,7 +161,7 @@ public class ProtocolProcessor {
         mServer = server;
 
         String onlineStatusCallback = server.getConfig().getProperty(BrokerConstants.USER_ONLINE_STATUS_CALLBACK);
-        if (!com.hazelcast.util.StringUtil.isNullOrEmpty(onlineStatusCallback)) {
+        if (!StringUtil.isNullOrEmpty(onlineStatusCallback)) {
             mUserOnlineStatusCallback = onlineStatusCallback;
         }
     }
@@ -309,7 +309,7 @@ public class ProtocolProcessor {
                     failedNoSession(channel);
                     return false;
                 }
-                
+
                 if (session != null && session.getUsername().equals(msg.payload().userName())) {
                     pwd = AES.AESDecrypt(pwd, session.getSecret(), true);
                 } else {
@@ -465,7 +465,7 @@ public class ProtocolProcessor {
     public void processPublish(Channel channel, MqttPublishMessage msg) {
         final MqttQoS qos = msg.fixedHeader().qosLevel();
         final String clientId = NettyUtils.clientID(channel);
-        
+
         LOG.info("Processing PUBLISH message. CId={}, topic={}, messageId={}, qos={}", clientId,
                 msg.variableHeader().topicName(), msg.variableHeader().packetId(), qos);
         switch (qos) {

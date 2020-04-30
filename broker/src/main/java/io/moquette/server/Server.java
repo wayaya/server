@@ -35,7 +35,6 @@ import io.moquette.spi.IStore;
 import io.moquette.spi.impl.ProtocolProcessor;
 import io.moquette.spi.impl.ProtocolProcessorBootstrapper;
 import io.moquette.spi.impl.security.AES;
-import io.moquette.spi.impl.subscriptions.Token;
 import io.moquette.spi.security.IAuthenticator;
 import io.moquette.spi.security.IAuthorizator;
 import io.moquette.spi.security.ISslContextCreator;
@@ -66,13 +65,13 @@ import static io.moquette.logging.LoggingUtils.getInterceptorIds;
 public class Server {
     private final static String BANNER =
         "            _  _      _   __  _                    _             _   \n" +
-        " __      __(_)| |  __| | / _|(_) _ __  ___    ___ | |__    __ _ | |_ \n" +
-        " \\ \\ /\\ / /| || | / _` || |_ | || '__|/ _ \\  / __|| '_ \\  / _` || __|\n" +
-        "  \\ V  V / | || || (_| ||  _|| || |  |  __/ | (__ | | | || (_| || |_ \n" +
-        "   \\_/\\_/  |_||_| \\__,_||_|  |_||_|   \\___|  \\___||_| |_| \\__,_| \\__|\n";
+            " __      __(_)| |  __| | / _|(_) _ __  ___    ___ | |__    __ _ | |_ \n" +
+            " \\ \\ /\\ / /| || | / _` || |_ | || '__|/ _ \\  / __|| '_ \\  / _` || __|\n" +
+            "  \\ V  V / | || || (_| ||  _|| || |  |  __/ | (__ | | | || (_| || |_ \n" +
+            "   \\_/\\_/  |_||_| \\__,_||_|  |_||_|   \\___|  \\___||_| |_| \\__,_| \\__|\n";
 
 
-    private static final Logger LOG = LoggerFactory.getLogger(Server.class);
+    private static final Logger logger = LoggerFactory.getLogger(Server.class);
 
     private static Server instance;
 
@@ -92,38 +91,47 @@ public class Server {
 
     private ProtocolProcessorBootstrapper m_processorBootstrapper;
 
-    private ThreadPoolExecutorWrapper dbScheduler;
-    private ThreadPoolExecutorWrapper imBusinessScheduler;
+    private ThreadPoolExecutorWrapper dbScheduler;  // 数据库线程池
+    private ThreadPoolExecutorWrapper imBusinessScheduler; // 业务线程池
 
     private IConfig mConfig;
 
     private IStore m_store;
+
     static {
+        logger.debug("打印banner");
         System.out.println(BANNER);
     }
 
     public static void start(String[] args) throws IOException {
-        instance = new Server();
-        final IConfig config = defaultConfig();
 
-        System.setProperty("hazelcast.logging.type", "none" );
+        logger.debug("start ...");
+
+        instance = new Server(); // 默认调用无参构造函数
+        final IConfig config = defaultConfig();  // 解析配置文件
+
+        System.setProperty("hazelcast.logging.type", "none");
         instance.mConfig = config;
-        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.ADVANCED);
+        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.ADVANCED); // 内存泄露级别
 
+        logger.debug("准备启动服务器...");
         instance.startServer(config);
 
+        logger.debug("准备开启网络端口与管理端口...");
         int httpLocalPort = Integer.parseInt(config.getProperty(BrokerConstants.HTTP_LOCAL_PORT));
         int httpAdminPort = Integer.parseInt(config.getProperty(BrokerConstants.HTTP_ADMIN_PORT));
 
         AdminAction.setSecretKey(config.getProperty(HTTP_SERVER_SECRET_KEY));
         AdminAction.setNoCheckTime(config.getProperty(HTTP_SERVER_API_NO_CHECK_TIME));
 
+        logger.debug("启动主服务对象...");
         final LoServer httpServer = new LoServer(httpLocalPort, httpAdminPort, instance.m_processor.getMessagesStore(), instance.m_store.sessionsStore());
         try {
             httpServer.start();
-        } catch (InterruptedException e) {
+        } catch (Exception e) {
+            logger.error("主服务对象启动出错了:", e);
             e.printStackTrace();
-            Utility.printExecption(LOG, e);
+            Utility.printExecption(logger, e);
         }
 
         final PushServer pushServer = PushServer.getServer();
@@ -133,14 +141,14 @@ public class Server {
         Runtime.getRuntime().addShutdownHook(new Thread(instance::stopServer));
         Runtime.getRuntime().addShutdownHook(new Thread(httpServer::shutdown));
 
+        logger.debug("Wildfire IM server start success...");
         System.out.println("Wildfire IM server start success...");
     }
 
     /**
      * Starts Moquette bringing the configuration from the file located at m_config/wildfirechat.conf
      *
-     * @throws IOException
-     *             in case of any IO error.
+     * @throws IOException in case of any IO error.
      */
     public void startServer() throws IOException {
         final IConfig config = defaultConfig();
@@ -148,8 +156,8 @@ public class Server {
     }
 
     public static IConfig defaultConfig() {
-        File defaultConfigurationFile = defaultConfigFile();
-        LOG.info("Starting Moquette server. Configuration file path={}", defaultConfigurationFile.getAbsolutePath());
+        File defaultConfigurationFile = defaultConfigFile(); // 从系统参数中获取配置文件目录
+        logger.info("Starting Moquette server. Configuration file path={}", defaultConfigurationFile.getAbsolutePath());
         IResourceLoader filesystemLoader = new FileResourceLoader(defaultConfigurationFile);
         return new ResourceLoaderConfig(filesystemLoader);
     }
@@ -163,13 +171,11 @@ public class Server {
     /**
      * Starts Moquette bringing the configuration from the given file
      *
-     * @param configFile
-     *            text file that contains the configuration.
-     * @throws IOException
-     *             in case of any IO Error.
+     * @param configFile text file that contains the configuration.
+     * @throws IOException in case of any IO Error.
      */
     public void startServer(File configFile) throws IOException {
-        LOG.info("Starting Moquette server. Configuration file path={}", configFile.getAbsolutePath());
+        logger.info("Starting Moquette server. Configuration file path={}", configFile.getAbsolutePath());
         IResourceLoader filesystemLoader = new FileResourceLoader(configFile);
         final IConfig config = new ResourceLoaderConfig(filesystemLoader);
         startServer(config);
@@ -178,14 +184,11 @@ public class Server {
     /**
      * Starts the server with the given properties.
      *
-     *
-     * @param configProps
-     *            the properties map to use as configuration.
-     * @throws IOException
-     *             in case of any IO Error.
+     * @param configProps the properties map to use as configuration.
+     * @throws IOException in case of any IO Error.
      */
     public void startServer(Properties configProps) throws IOException {
-        LOG.info("Starting Moquette server using properties object");
+        logger.info("Starting Moquette server using properties object");
         final IConfig config = new MemoryConfig(configProps);
         startServer(config);
     }
@@ -193,13 +196,11 @@ public class Server {
     /**
      * Starts Moquette bringing the configuration files from the given Config implementation.
      *
-     * @param config
-     *            the configuration to use to start the broker.
-     * @throws IOException
-     *             in case of any IO Error.
+     * @param config the configuration to use to start the broker.
+     * @throws IOException in case of any IO Error.
      */
     public void startServer(IConfig config) throws IOException {
-        LOG.info("Starting Moquette server using IConfig instance...");
+        logger.info("Starting Moquette server using IConfig instance...");
         startServer(config, null);
     }
 
@@ -207,79 +208,85 @@ public class Server {
      * Starts Moquette with config provided by an implementation of IConfig class and with the set
      * of InterceptHandler.
      *
-     * @param config
-     *            the configuration to use to start the broker.
-     * @param handlers
-     *            the handlers to install in the broker.
-     * @throws IOException
-     *             in case of any IO Error.
+     * @param config   the configuration to use to start the broker.
+     * @param handlers the handlers to install in the broker.
+     * @throws IOException in case of any IO Error.
      */
     public void startServer(IConfig config, List<? extends InterceptHandler> handlers) throws IOException {
-        LOG.info("Starting moquette server using IConfig instance and intercept handlers");
+        logger.info("Starting moquette server using IConfig instance and intercept handlers");
         startServer(config, handlers, null, null, null);
     }
 
     public void startServer(IConfig config, List<? extends InterceptHandler> handlers, ISslContextCreator sslCtxCreator,
-            IAuthenticator authenticator, IAuthorizator authorizator) throws IOException {
+                            IAuthenticator authenticator, IAuthorizator authorizator) throws IOException {
         if (handlers == null) {
             handlers = Collections.emptyList();
         }
-        DBUtil.init(config);
-        String strKey = config.getProperty(BrokerConstants.CLIENT_PROTO_SECRET_KEY);
+        DBUtil.init(config); // 初始化数据库
+
+        logger.debug("解析客户端协议栈密钥...");
+        String strKey = config.getProperty(BrokerConstants.CLIENT_PROTO_SECRET_KEY); // 客户端协议栈密钥
         String[] strs = strKey.split(",");
-        if(strs.length != 16) {
-            LOG.error("Key error, it length should be 16");
+        if (strs.length != 16) {
+            logger.error("Key error, it length should be 16");
         }
         byte[] keys = new byte[16];
         for (int i = 0; i < 16; i++) {
-            keys[i] = (byte)(Integer.parseInt(strs[i].replace("0X", "").replace("0x", ""), 16));
+            keys[i] = (byte) (Integer.parseInt(strs[i].replace("0X", "").replace("0x", ""), 16));
         }
 
-
         AES.init(keys);
+        logger.debug("完成客户端协议栈密钥解析");
 
-        LOG.info("Starting Moquette Server. MQTT message interceptors={}", getInterceptorIds(handlers));
+        // 输出消息拦截器ID
+        logger.info("Starting Moquette Server. MQTT message interceptors={}", getInterceptorIds(handlers));
 
-        int threadNum = Runtime.getRuntime().availableProcessors() * 2;
+        int threadNum = Runtime.getRuntime().availableProcessors() * 2; // 计算线程数量
+        // 数据库线程池
         dbScheduler = new ThreadPoolExecutorWrapper(Executors.newScheduledThreadPool(threadNum), threadNum, "db");
+        // 业务线城市
         imBusinessScheduler = new ThreadPoolExecutorWrapper(Executors.newScheduledThreadPool(threadNum), threadNum, "business");
 
+        logger.debug("配置拦截器...");
         final String handlerProp = System.getProperty(BrokerConstants.INTERCEPT_HANDLER_PROPERTY_NAME);
         if (handlerProp != null) {
             config.setProperty(BrokerConstants.INTERCEPT_HANDLER_PROPERTY_NAME, handlerProp);
         }
+        logger.debug("完成拦截器配置");
 
-        initMediaServerConfig(config);
+        logger.debug("初始化服务器属性信息...");
+        initMediaServerConfig(config); // 初始化服务器属性信息
 
         final String persistencePath = config.getProperty(BrokerConstants.PERSISTENT_STORE_PROPERTY_NAME);
-        LOG.info("Configuring Using persistent store file, path={}", persistencePath);
-        m_store = initStore(config, this);
-        m_processorBootstrapper = new ProtocolProcessorBootstrapper();
+        logger.info("Configuring Using persistent store file, path={}", persistencePath);
+        m_store = initStore(config, this); // 在内存中存储 消息对象与会话对象
+        m_processorBootstrapper = new ProtocolProcessorBootstrapper(); // 协议执行对象
 
+        logger.info("构建分布式内存集群...");
         boolean configured = configureCluster(config);
 
         m_store.initStore();
         final ProtocolProcessor processor = m_processorBootstrapper.init(config, handlers, authenticator, authorizator,
             this, m_store);
-        LOG.info("Initialized MQTT protocol processor");
+        logger.info("Initialized MQTT protocol processor");
         if (sslCtxCreator == null) {
-            LOG.warn("Using default SSL context creator");
+            logger.warn("Using default SSL context creator");
             sslCtxCreator = new DefaultMoquetteSslContextCreator(config);
         }
 
         m_processor = processor;
 
-        LOG.info("Binding server to the configured ports");
+        logger.info("Binding server to the configured ports");
         m_acceptor = new NettyAcceptor();
         m_acceptor.initialize(processor, config, sslCtxCreator);
 
 
-        LOG.info("Moquette server has been initialized successfully");
+        logger.info("Moquette server has been initialized successfully");
         m_initialized = configured;
     }
 
     private IStore initStore(IConfig props, Server server) {
-        LOG.info("Initializing messages and sessions stores...");
+        logger.info("Initializing messages and sessions stores...");
         IStore store = instantiateConfiguredStore(props, server.getDbScheduler(), server);
         if (store == null) {
             throw new IllegalArgumentException("Can't start the persistence layer");
@@ -297,10 +304,10 @@ public class Server {
     }
 
     private void initMediaServerConfig(IConfig config) {
-    	MediaServerConfig.QINIU_ACCESS_KEY = config.getProperty(BrokerConstants.QINIU_ACCESS_KEY, MediaServerConfig.QINIU_ACCESS_KEY);
-    	MediaServerConfig.QINIU_SECRET_KEY = config.getProperty(BrokerConstants.QINIU_SECRET_KEY, MediaServerConfig.QINIU_SECRET_KEY);
-    	MediaServerConfig.QINIU_SERVER_URL = config.getProperty(BrokerConstants.QINIU_SERVER_URL, MediaServerConfig.QINIU_SERVER_URL);
-    	if (MediaServerConfig.QINIU_SERVER_URL.contains("//")) {
+        MediaServerConfig.QINIU_ACCESS_KEY = config.getProperty(BrokerConstants.QINIU_ACCESS_KEY, MediaServerConfig.QINIU_ACCESS_KEY);
+        MediaServerConfig.QINIU_SECRET_KEY = config.getProperty(BrokerConstants.QINIU_SECRET_KEY, MediaServerConfig.QINIU_SECRET_KEY);
+        MediaServerConfig.QINIU_SERVER_URL = config.getProperty(BrokerConstants.QINIU_SERVER_URL, MediaServerConfig.QINIU_SERVER_URL);
+        if (MediaServerConfig.QINIU_SERVER_URL.contains("//")) {
             MediaServerConfig.QINIU_SERVER_URL = MediaServerConfig.QINIU_SERVER_URL.substring(MediaServerConfig.QINIU_SERVER_URL.indexOf("//") + 2);
         }
 
@@ -332,7 +339,7 @@ public class Server {
         MediaServerConfig.QINIU_BUCKET_FAVORITE_DOMAIN = config.getProperty(BrokerConstants.QINIU_BUCKET_FAVORITE_DOMAIN);
 
 
-    	MediaServerConfig.SERVER_IP = getServerIp(config);
+        MediaServerConfig.SERVER_IP = getServerIp(config);
 
         MediaServerConfig.HTTP_SERVER_PORT = Integer.parseInt(config.getProperty(BrokerConstants.HTTP_SERVER_PORT));
 
@@ -345,6 +352,7 @@ public class Server {
 
         MediaServerConfig.USER_QINIU = Integer.parseInt(config.getProperty(BrokerConstants.USER_QINIU)) > 0;
     }
+
     private String getServerIp(IConfig config) {
         String serverIp = config.getProperty(BrokerConstants.SERVER_IP_PROPERTY_NAME);
 
@@ -353,39 +361,44 @@ public class Server {
         }
         return serverIp;
     }
-    private boolean configureCluster(IConfig config) throws FileNotFoundException {
-        LOG.info("Configuring embedded Hazelcast instance");
-        String serverIp = getServerIp(config);
 
-        String hzConfigPath = config.getProperty(BrokerConstants.HAZELCAST_CONFIGURATION);
+    private boolean configureCluster(IConfig config) throws FileNotFoundException {
+        logger.info("Configuring embedded Hazelcast instance");
+        String serverIp = getServerIp(config); // 获取服务器ip
+
+        String sysConfigPath = System.getProperty(BrokerConstants.HAZELCAST_CONFIGURATION, null);
+        String bizConfigPath = config.getProperty(BrokerConstants.HAZELCAST_CONFIGURATION); // 获取配置文件位置
+        String hzConfigPath = sysConfigPath + File.separator + bizConfigPath;
+
         String hzClientIp = config.getProperty(BrokerConstants.HAZELCAST_CLIENT_IP, "localhost");
         String hzClientPort = config.getProperty(BrokerConstants.HAZELCAST_CLIENT_PORT, "5703");
 
         if (hzConfigPath != null) {
+            logger.debug("hazelcast配置文件位置:{}", hzConfigPath);
             boolean isHzConfigOnClasspath = this.getClass().getClassLoader().getResource(hzConfigPath) != null;
             Config hzconfig = isHzConfigOnClasspath
-                    ? new ClasspathXmlConfig(hzConfigPath)
-                    : new FileSystemXmlConfig(hzConfigPath);
-            LOG.info("Starting Hazelcast instance. ConfigurationFile={}", hzconfig);
+                ? new ClasspathXmlConfig(hzConfigPath)
+                : new FileSystemXmlConfig(hzConfigPath);
+            logger.info("Starting Hazelcast instance. ConfigurationFile={}", hzconfig);
             hazelcastInstance = Hazelcast.newHazelcastInstance(hzconfig);
         } else {
-            LOG.info("Starting Hazelcast instance with default configuration");
+            logger.info("Starting Hazelcast instance with default configuration");
             hazelcastInstance = Hazelcast.newHazelcastInstance();
         }
 
 
         String longPort = config.getProperty(BrokerConstants.PORT_PROPERTY_NAME);
-        String shortPort = config.getProperty(BrokerConstants.HTTP_SERVER_PORT);
+        String shortPort = config.getProperty(BrokerConstants.HTTP_SERVER_PORT); // http 80端口
         String nodeIdStr = config.getProperty(BrokerConstants.NODE_ID);
         ISet<Integer> nodeIdSet = hazelcastInstance.getSet(BrokerConstants.NODE_IDS);
         int nodeId;
         try {
             nodeId = Integer.parseInt(nodeIdStr);
-        }catch (Exception e){
+        } catch (Exception e) {
             throw new IllegalArgumentException("nodeId error: " + nodeIdStr);
         }
-        if (nodeIdSet != null && nodeIdSet.contains(nodeId)){
-            LOG.error("只允许一个实例运行，多个实例会引起冲突，进程终止");
+        if (nodeIdSet != null && nodeIdSet.contains(nodeId)) {
+            logger.error("只允许一个实例运行，多个实例会引起冲突，进程终止");
             System.exit(-1);
         }
 
@@ -405,6 +418,8 @@ public class Server {
                 e.printStackTrace();
             }
         }
+
+        logger.debug("初始化远程调用...");
         RPCCenter.getInstance().init(this);
         return true;
     }
@@ -416,10 +431,10 @@ public class Server {
     public void internalRpcMsg(String fromUser, String clientId, byte[] message, int messageId, String from, String request, boolean isAdmin) {
 
         if (!m_initialized) {
-            LOG.error("Moquette is not started, internal message cannot be notify");
+            logger.error("Moquette is not started, internal message cannot be notify");
             return;
         }
-        LOG.debug("internalNotifyMsg");
+        logger.debug("internalNotifyMsg");
         m_processor.onRpcMsg(fromUser, clientId, message, messageId, from, request, isAdmin);
     }
 
@@ -429,57 +444,55 @@ public class Server {
 
     public void stopServer() {
         System.out.println("Server will flush data to db before shutting down, please wait 5 seconds!");
-        LOG.info("Unbinding server from the configured ports");
+        logger.info("Unbinding server from the configured ports");
         m_shutdowning = true;
 
         m_acceptor.close();
-        LOG.trace("Stopping MQTT protocol processor");
+        logger.trace("Stopping MQTT protocol processor");
         m_processorBootstrapper.shutdown();
         m_initialized = false;
         if (hazelcastInstance != null) {
-            LOG.trace("Stopping embedded Hazelcast instance");
+            logger.trace("Stopping embedded Hazelcast instance");
             try {
                 hazelcastInstance.shutdown();
             } catch (HazelcastInstanceNotActiveException e) {
-                LOG.warn("embedded Hazelcast instance is already shut down.");
+                logger.warn("embedded Hazelcast instance is already shut down.");
             }
         }
 
         dbScheduler.shutdown();
         imBusinessScheduler.shutdown();
 
-        LOG.info("Moquette server has been stopped.");
+        logger.info("Moquette server has been stopped.");
     }
 
     /**
      * SPI method used by Broker embedded applications to add intercept handlers.
      *
-     * @param interceptHandler
-     *            the handler to add.
+     * @param interceptHandler the handler to add.
      */
     public void addInterceptHandler(InterceptHandler interceptHandler) {
         if (!m_initialized) {
-            LOG.error("Moquette is not started, MQTT message interceptor cannot be added. InterceptorId={}",
+            logger.error("Moquette is not started, MQTT message interceptor cannot be added. InterceptorId={}",
                 interceptHandler.getID());
             throw new IllegalStateException("Can't register interceptors on a server that is not yet started");
         }
-        LOG.info("Adding MQTT message interceptor. InterceptorId={}", interceptHandler.getID());
+        logger.info("Adding MQTT message interceptor. InterceptorId={}", interceptHandler.getID());
         m_processor.addInterceptHandler(interceptHandler);
     }
 
     /**
      * SPI method used by Broker embedded applications to remove intercept handlers.
      *
-     * @param interceptHandler
-     *            the handler to remove.
+     * @param interceptHandler the handler to remove.
      */
     public void removeInterceptHandler(InterceptHandler interceptHandler) {
         if (!m_initialized) {
-            LOG.error("Moquette is not started, MQTT message interceptor cannot be removed. InterceptorId={}",
+            logger.error("Moquette is not started, MQTT message interceptor cannot be removed. InterceptorId={}",
                 interceptHandler.getID());
             throw new IllegalStateException("Can't deregister interceptors from a server that is not yet started");
         }
-        LOG.info("Removing MQTT message interceptor. InterceptorId={}", interceptHandler.getID());
+        logger.info("Removing MQTT message interceptor. InterceptorId={}", interceptHandler.getID());
         m_processor.removeInterceptHandler(interceptHandler);
     }
 

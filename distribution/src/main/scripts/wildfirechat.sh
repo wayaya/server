@@ -40,7 +40,8 @@ fi
 export JAVA
 
 LOG_FILE=$WILDFIRECHAT_HOME/config/log4j.properties
-HZ_CONF_FILE=$WILDFIRECHAT_HOME/config/hazelcast.xml
+#HZ_CONF_FILE=$WILDFIRECHAT_HOME/config/hazelcast.xml
+HZ_CONF_FILE=$WILDFIRECHAT_HOME/
 C3P0_CONF_FILE=$WILDFIRECHAT_HOME/config/c3p0-config.xml
 
 WILDFIRECHAT_PATH=$WILDFIRECHAT_HOME/
@@ -95,8 +96,10 @@ log "line:${LINENO} ${JAVA}"
 log "line:${LINENO} ${JAVA_OPTS}"
 log "line:${LINENO} ${JAVA_OPTS_SCRIPT}"
 
+log "line:${LINENO} -Dhazelcast.configuration=${HZ_CONF_FILE}"
+
 #JAVA_OPTS -XX:+UseG1GC -XX:G1RSetUpdatingPauseTimePercent=5 -XX:MaxGCPauseMillis=500 -XX:+PrintGCDetails -XX:+PrintHeapAtGC -XX:+PrintTenuringDistribution -XX:+PrintGCApplicationStoppedTime -XX:+PrintPromotionFailure -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=10M
 #JAVA_OPTS_SCRIPT -XX:+HeapDumpOnOutOfMemoryError -Djava.awt.headless=true
 # shellcheck disable=SC2086
 #$JAVA -server ${JAVA_OPTS} ${JAVA_OPTS_SCRIPT} -Dlog4j.configuration="file:$LOG_FILE" -Dcom.mchange.v2.c3p0.cfg.xml="$C3P0_CONF_FILE" -Dhazelcast.configuration="file:$HZ_CONF_FILE" -Dwildfirechat.path="$WILDFIRECHAT_PATH" -cp "$WILDFIRECHAT_HOME/lib/*" cn.wildfirechat.server.Server
-$JAVA -server -Dlog4j.configuration="file:$LOG_FILE" -Dcom.mchange.v2.c3p0.cfg.xml="$C3P0_CONF_FILE" -Dhazelcast.configuration="file:$HZ_CONF_FILE" -Dwildfirechat.path="$WILDFIRECHAT_PATH" -cp "$WILDFIRECHAT_HOME/lib/*" cn.wildfirechat.server.Server
+$JAVA -server -Dlog4j.configuration="file:$LOG_FILE" -Dcom.mchange.v2.c3p0.cfg.xml="$C3P0_CONF_FILE" -Dhazelcast.configuration="$HZ_CONF_FILE" -Dwildfirechat.path="$WILDFIRECHAT_PATH" -cp "$WILDFIRECHAT_HOME/lib/*" cn.wildfirechat.server.Server
